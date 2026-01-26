@@ -1,0 +1,13 @@
+credentials:
+  usernames:
+    admin:
+      email: admin@example.com
+      name: 管理者
+      password: $2b$12$76pY.UuE576vF/.J/.lWQu/lU4W8S/6G59Iu2HjPjE2HjPjE2HjPj
+cookie:
+  expiry_days: 30
+  key: some_signature_key
+  name: some_cookie_name
+preauthorized:
+  emails:
+    - admin@example.com
