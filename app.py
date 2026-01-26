@@ -22,7 +22,7 @@ try:
 except FileNotFoundError:
     # config.yamlがない場合はデフォルト設定で作成
     # デフォルトパスワードは 'password'
-    default_password_hash = stauth.Hasher(['password']).generate()[0]
+    default_password_hash = stauth.Hasher.generate(['password'])[0]
     config = {
         'cookie': {
             'expiry_days': 30,
