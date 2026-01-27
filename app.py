@@ -52,11 +52,9 @@ authenticator = stauth.Authenticate(
 # 2. ログインフォームの表示
 authentication_status = authenticator.login(location='main')
 
-if authentication_status:
+# 認証ステータスに基づいて処理を分岐
+if st.session_state["authentication_status"]:
     # ログイン成功時
-    st.session_state["authentication_status"] = authentication_status
-    st.session_state["name"] = name
-    st.session_state["username"] = username
     
     # ログアウトボタンをサイドバーに表示
     authenticator.logout('ログアウト', 'sidebar')
@@ -68,10 +66,12 @@ if authentication_status:
         st.session_state.processor = DataProcessor()
     processor = st.session_state.processor
     
-    if 'page' not in st.session_state:
-        st.session_state.page = "着地予測ダッシュボード"
-    if 'display_mode' not in st.session_state:
-        st.session_state.display_mode = "要約"
+    # ... (メインコンテンツの開始)
+    
+elif st.session_state["authentication_status"] == False:
+    st.error('ユーザー名またはパスワードが間違っています')
+elif st.session_state["authentication_status"] == None:
+    st.warning('ユーザー名とパスワードを入力してください')lay_mode = "要約"
     if 'scenario' not in st.session_state:
         st.session_state.scenario = "現実"
     
