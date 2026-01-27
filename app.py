@@ -50,7 +50,7 @@ authenticator = stauth.Authenticate(
 )
 
 # 2. ログインフォームの表示
-name, authentication_status, username = authenticator.login('財務予測アプリ ログイン', 'main')
+name, authentication_status, username = authenticator.login('財務予測アプリ ログイン', location='main')
 
 if authentication_status:
     # ログイン成功時
