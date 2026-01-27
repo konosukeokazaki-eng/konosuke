@@ -71,7 +71,8 @@ if st.session_state["authentication_status"]:
 elif st.session_state["authentication_status"] == False:
     st.error('ユーザー名またはパスワードが間違っています')
 elif st.session_state["authentication_status"] == None:
-    st.warning('ユーザー名とパスワードを入力してください')lay_mode = "要約"
+    st.warning('ユーザー名とパスワードを入力してください')
+    display_mode = "要約"
     if 'scenario' not in st.session_state:
         st.session_state.scenario = "現実"
     
