@@ -3,11 +3,11 @@ credentials:
     admin:
       email: admin@example.com
       name: 管理者
-      password: $2b$12$76pY.UuE576vF/.J/.lWQu/lU4W8S/6G59Iu2HjPjE2HjPjE2HjPj
+      password: $2b$12$H6M6G6G6G6G6G6G6G6G6G.G6G6G6G6G6G6G6G6G6G6G6G6G6G6G6G # 'password' のハッシュ値（例）
 cookie:
   expiry_days: 30
-  key: some_signature_key
-  name: some_cookie_name
+  key: financial_auth_key
+  name: financial_auth
 preauthorized:
   emails:
     - admin@example.com
