@@ -7,8 +7,6 @@ from plotly.subplots import make_subplots
 import sqlite3
 import os
 import tempfile
-import yaml
-from yaml.loader import SafeLoader
 from data_processor import DataProcessor
 
 # ページ設定
@@ -259,12 +257,24 @@ if companies.empty:
     selected_comp_name = ""
 else:
     comp_names = companies['name'].tolist()
+    
+    # 前回の選択を保存
+    prev_comp_id = st.session_state.get('selected_comp_id', None)
+    
     selected_comp_name = st.sidebar.selectbox(
         "🏢 会社を選択",
         comp_names,
         key="comp_select"
     )
     selected_comp_id = int(companies[companies['name'] == selected_comp_name]['id'].iloc[0])
+    
+    # 会社が変更された場合、データをリフレッシュ
+    if prev_comp_id != selected_comp_id:
+        # session_stateをクリア（データ再読み込み用）
+        for key in ['actuals_df', 'forecasts_df']:
+            if key in st.session_state:
+                del st.session_state[key]
+    
     st.session_state.selected_comp_id = selected_comp_id
     st.session_state.selected_comp_name = selected_comp_name
 
@@ -274,6 +284,9 @@ else:
         st.sidebar.warning("期データがありません")
         selected_period_num = 0
     else:
+        # 前回の選択を保存
+        prev_period_id = st.session_state.get('selected_period_id', None)
+        
         period_options = [
             f"第{row['period_num']}期 ({row['start_date']} 〜 {row['end_date']})"
             for _, row in periods.iterrows()
@@ -292,6 +305,13 @@ else:
                 selected_period_id = int(period_match['id'].iloc[0])
             else:
                 selected_period_id = int(period_match.iloc[0, 0])
+            
+            # 期が変更された場合、データをリフレッシュ
+            if prev_period_id != selected_period_id:
+                # session_stateをクリア（データ再読み込み用）
+                for key in ['actuals_df', 'forecasts_df']:
+                    if key in st.session_state:
+                        del st.session_state[key]
                 
             st.session_state.selected_period_id = selected_period_id
             st.session_state.selected_period_num = selected_period_num
@@ -351,123 +371,123 @@ else:
         horizontal=True,
         label_visibility="collapsed"
     )
-
-st.sidebar.markdown("---")
-
-# メニュー
-st.sidebar.markdown("### 📋 メニュー")
-menu = [
-    "着地予測ダッシュボード",
-    "比較分析レポート",
-    "全体予測PL & 補助科目入力",
-    "実績データ入力",
-    "データインポート",
-    "シナリオ一括設定",
-    "システム設定"
-]
-
-# メニューアイコン
-menu_icons = {
-    "着地予測ダッシュボード": "📊",
-    "比較分析レポート": "📈",
-    "全体予測PL & 補助科目入力": "📝",
-    "実績データ入力": "⌨️",
-    "データインポート": "📥",
-    "シナリオ一括設定": "🎯",
-    "システム設定": "⚙️"
-}
-
-selected_menu = st.sidebar.radio(
-    "移動先を選択",
-    menu,
-    index=menu.index(st.session_state.page) if st.session_state.page in menu else 0,
-    format_func=lambda x: f"{menu_icons.get(x, '•')} {x}",
-    label_visibility="collapsed"
-)
-st.session_state.page = selected_menu
-
-# 通貨フォーマット
-def format_currency(val):
-    if isinstance(val, (int, float, complex)) and not isinstance(val, bool):
-        if pd.isna(val):
-            return ""
-        return f"¥{int(val):,}"
-    return val
-
-# データの読み込み
-if 'selected_period_id' in st.session_state:
-    actuals_df = processor.load_actual_data(st.session_state.selected_period_id)
-    forecasts_df = processor.load_forecast_data(st.session_state.selected_period_id, "現実")
     
-    # シナリオ調整
-    if st.session_state.scenario != "現実":
-        rate = st.session_state.scenario_rates[st.session_state.scenario]
-        split_idx = processor.get_split_index(
-            st.session_state.selected_comp_id,
-            st.session_state.current_month,
-            st.session_state.selected_period_id
-        )
-        forecast_months = months[split_idx:]
-        
-        for item in processor.all_items:
-            if item == "売上高":
-                forecasts_df.loc[forecasts_df['項目名'] == item, forecast_months] *= (1 + rate)
-            elif item == "売上原価":
-                forecasts_df.loc[forecasts_df['項目名'] == item, forecast_months] *= (1 - rate * 0.5)
-            elif item in processor.ga_items:
-                forecasts_df.loc[forecasts_df['項目名'] == item, forecast_months] *= (1 - rate * 0.3)
-                
-        st.session_state.adjusted_forecasts_df = forecasts_df.copy()
+    st.sidebar.markdown("---")
     
-    # 補助科目合計の反映
-    sub_accounts_df = processor.load_sub_accounts(st.session_state.selected_period_id, st.session_state.scenario)
-    if not sub_accounts_df.empty:
-        aggregated = sub_accounts_df.groupby(['parent_item', 'month'])['amount'].sum().reset_index()
-        for _, row in aggregated.iterrows():
-            parent = row['parent_item']
-            month = row['month']
-            amount = row['amount']
-            forecasts_df.loc[forecasts_df['項目名'] == parent, month] = amount
+    # メニュー
+    st.sidebar.markdown("### 📋 メニュー")
+    menu = [
+        "着地予測ダッシュボード",
+        "比較分析レポート",
+        "全体予測PL & 補助科目入力",
+        "実績データ入力",
+        "データインポート",
+        "シナリオ一括設定",
+        "システム設定"
+    ]
     
-    # PL計算
-    pl_df = processor.calculate_pl(
-        actuals_df,
-        forecasts_df,
-        processor.get_split_index(
-            st.session_state.selected_comp_id,
-            st.session_state.current_month,
-            st.session_state.selected_period_id
-        ),
-        months
+    # メニューアイコン
+    menu_icons = {
+        "着地予測ダッシュボード": "📊",
+        "比較分析レポート": "📈",
+        "全体予測PL & 補助科目入力": "📝",
+        "実績データ入力": "⌨️",
+        "データインポート": "📥",
+        "シナリオ一括設定": "🎯",
+        "システム設定": "⚙️"
+    }
+    
+    selected_menu = st.sidebar.radio(
+        "移動先を選択",
+        menu,
+        index=menu.index(st.session_state.page) if st.session_state.page in menu else 0,
+        format_func=lambda x: f"{menu_icons.get(x, '•')} {x}",
+        label_visibility="collapsed"
     )
+    st.session_state.page = selected_menu
     
-    # 表示モードでフィルタ
-    if st.session_state.display_mode == "要約":
-        pl_display = pl_df[pl_df['タイプ'] == '要約']
-    else:
-        pl_display = pl_df
+    # 通貨フォーマット
+    def format_currency(val):
+        if isinstance(val, (int, float, complex)) and not isinstance(val, bool):
+            if pd.isna(val):
+                return ""
+            return f"¥{int(val):,}"
+        return val
     
-    # --------------------------------------------------------------------------------
-    # ページコンテンツ
-    # --------------------------------------------------------------------------------
-    
-    if st.session_state.page == "着地予測ダッシュボード":
-        st.title("📊 着地予測ダッシュボード")
+    # データの読み込み
+    if 'selected_period_id' in st.session_state:
+        actuals_df = processor.load_actual_data(st.session_state.selected_period_id)
+        forecasts_df = processor.load_forecast_data(st.session_state.selected_period_id, "現実")
         
-        st.markdown(f"""
-        <div class="info-box">
-            <strong>🏢 {st.session_state.selected_comp_name}</strong> | 
-            第{st.session_state.selected_period_num}期 | 
-            実績: {st.session_state.start_date} 〜 {st.session_state.current_month} | 
-            シナリオ: <strong>{st.session_state.scenario}</strong>
-        </div>
-        """, unsafe_allow_html=True)
+        # シナリオ調整
+        if st.session_state.scenario != "現実":
+            rate = st.session_state.scenario_rates[st.session_state.scenario]
+            split_idx = processor.get_split_index(
+                st.session_state.selected_comp_id,
+                st.session_state.current_month,
+                st.session_state.selected_period_id
+            )
+            forecast_months = months[split_idx:]
+            
+            for item in processor.all_items:
+                if item == "売上高":
+                    forecasts_df.loc[forecasts_df['項目名'] == item, forecast_months] *= (1 + rate)
+                elif item == "売上原価":
+                    forecasts_df.loc[forecasts_df['項目名'] == item, forecast_months] *= (1 - rate * 0.5)
+                elif item in processor.ga_items:
+                    forecasts_df.loc[forecasts_df['項目名'] == item, forecast_months] *= (1 - rate * 0.3)
+                    
+            st.session_state.adjusted_forecasts_df = forecasts_df.copy()
         
-        # KPIサマリーカード
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # 補助科目合計の反映
+        sub_accounts_df = processor.load_sub_accounts(st.session_state.selected_period_id, st.session_state.scenario)
+        if not sub_accounts_df.empty:
+            aggregated = sub_accounts_df.groupby(['parent_item', 'month'])['amount'].sum().reset_index()
+            for _, row in aggregated.iterrows():
+                parent = row['parent_item']
+                month = row['month']
+                amount = row['amount']
+                forecasts_df.loc[forecasts_df['項目名'] == parent, month] = amount
         
-        with col1:
-            sales_total = pl_display[pl_display['項目名'] == '売上高']['合計'].iloc[0]
+        # PL計算
+        pl_df = processor.calculate_pl(
+            actuals_df,
+            forecasts_df,
+            processor.get_split_index(
+                st.session_state.selected_comp_id,
+                st.session_state.current_month,
+                st.session_state.selected_period_id
+            ),
+            months
+        )
+        
+        # 表示モードでフィルタ
+        if st.session_state.display_mode == "要約":
+            pl_display = pl_df[pl_df['タイプ'] == '要約']
+        else:
+            pl_display = pl_df
+        
+        # --------------------------------------------------------------------------------
+        # ページコンテンツ
+        # --------------------------------------------------------------------------------
+        
+        if st.session_state.page == "着地予測ダッシュボード":
+            st.title("📊 着地予測ダッシュボード")
+            
+            st.markdown(f"""
+            <div class="info-box">
+                <strong>🏢 {st.session_state.selected_comp_name}</strong> | 
+                第{st.session_state.selected_period_num}期 | 
+                実績: {st.session_state.start_date} 〜 {st.session_state.current_month} | 
+                シナリオ: <strong>{st.session_state.scenario}</strong>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # KPIサマリーカード
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            with col1:
+                sales_total = pl_display[pl_display['項目名'] == '売上高']['合計'].iloc[0]
                 st.markdown(f"""
                 <div class="summary-card-blue">
                     <div class="card-title">売上高</div>
@@ -535,9 +555,11 @@ if 'selected_period_id' in st.session_state:
                         return ['background-color: #e3f2fd; font-weight: bold'] * len(row)
                     return [''] * len(row)
                 
-                styled_df = pl_display.drop(columns=['タイプ']).style\
+                # タイプ列を使ってスタイルを適用してから削除
+                styled_df = pl_display.style\
+                    .apply(highlight_summary, axis=1)\
                     .format(format_currency, subset=[c for c in pl_display.columns if c not in ['項目名', 'タイプ']])\
-                    .apply(highlight_summary, axis=1)
+                    .hide(axis="columns", subset=['タイプ'])
                 
                 st.dataframe(styled_df, use_container_width=True, height=600)
             
@@ -1167,14 +1189,14 @@ if 'selected_period_id' in st.session_state:
                     
                     st.markdown("---")
                     
-                # 登録済み期間一覧
-                st.subheader("📋 登録済み会計期間")
-                
-                periods_list = processor.get_company_periods(st.session_state.selected_comp_id)
-                if not periods_list.empty:
-                    st.dataframe(periods_list, use_container_width=True)
-                else:
-                    st.info("登録されている会計期間がありません")
+                    # 登録済み期間一覧
+                    st.subheader("📋 登録済み会計期間")
+                    
+                    periods_list = processor.get_company_periods(st.session_state.selected_comp_id)
+                    if not periods_list.empty:
+                        st.dataframe(periods_list, use_container_width=True)
+                    else:
+                        st.info("登録されている会計期間がありません")
 
-else:
-    st.warning("⚠️ 会計期間が選択されていません。システム設定から登録してください。")
+    else:
+        st.warning("⚠️ 会計期間が選択されていません。システム設定から登録してください。")
