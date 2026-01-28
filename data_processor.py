@@ -219,6 +219,34 @@ class DataProcessor:
         
         conn.commit()
         conn.close()
+    
+    def _sort_months(self, df, fiscal_period_id):
+        """会計期の開始月を考慮して月をソート"""
+        try:
+            # 会計期情報を取得
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT start_date, end_date FROM fiscal_periods WHERE id = ?",
+                (fiscal_period_id,)
+            )
+            result = cursor.fetchone()
+            conn.close()
+            
+            if not result:
+                return df
+            
+            start_date_str, end_date_str = result
+            
+            # YYYY-MM形式の月をdatetimeに変換してソート
+            if 'month' in df.columns:
+                df['_month_dt'] = pd.to_datetime(df['month'] + '-01')
+                df = df.sort_values('_month_dt').drop(columns=['_month_dt'])
+            
+            return df
+        except Exception as e:
+            print(f"Error sorting months: {e}")
+            return df
 
     def get_companies(self):
         """会社一覧を取得"""
@@ -321,17 +349,23 @@ class DataProcessor:
     def load_actual_data(self, fiscal_period_id):
         """実績データを読み込み"""
         conn = sqlite3.connect(self.db_path)
-        df = pd.read_sql_query(
-            "SELECT item_name as 項目名, month, amount FROM actual_data WHERE fiscal_period_id = ?",
-            conn,
-            params=(fiscal_period_id,)
-        )
-        conn.close()
+        try:
+            df = pd.read_sql_query(
+                "SELECT item_name as 項目名, month, amount FROM actual_data WHERE fiscal_period_id = ?",
+                conn,
+                params=(fiscal_period_id,)
+            )
+        finally:
+            conn.close()
         
         if df.empty:
             return pd.DataFrame({'項目名': self.all_items}).fillna(0)
         
         df = df.drop_duplicates(subset=['項目名', 'month'], keep='last')
+        
+        # 月を正しくソート（会計期順）
+        df = self._sort_months(df, fiscal_period_id)
+        
         pivot_df = df.pivot(index='項目名', columns='month', values='amount').reset_index()
         
         all_items_df = pd.DataFrame({'項目名': self.all_items})
@@ -341,17 +375,23 @@ class DataProcessor:
     def load_forecast_data(self, fiscal_period_id, scenario):
         """予測データを読み込み"""
         conn = sqlite3.connect(self.db_path)
-        df = pd.read_sql_query(
-            "SELECT item_name as 項目名, month, amount FROM forecast_data WHERE fiscal_period_id = ? AND scenario = ?",
-            conn,
-            params=(fiscal_period_id, scenario)
-        )
-        conn.close()
+        try:
+            df = pd.read_sql_query(
+                "SELECT item_name as 項目名, month, amount FROM forecast_data WHERE fiscal_period_id = ? AND scenario = ?",
+                conn,
+                params=(fiscal_period_id, scenario)
+            )
+        finally:
+            conn.close()
         
         if df.empty:
             return pd.DataFrame({'項目名': self.all_items}).fillna(0)
         
         df = df.drop_duplicates(subset=['項目名', 'month'], keep='last')
+        
+        # 月を正しくソート（会計期順）
+        df = self._sort_months(df, fiscal_period_id)
+        
         pivot_df = df.pivot(index='項目名', columns='month', values='amount').reset_index()
         
         all_items_df = pd.DataFrame({'項目名': self.all_items})
@@ -360,6 +400,7 @@ class DataProcessor:
 
     def save_actual_item(self, fiscal_period_id, item_name, values_dict):
         """実績データを保存"""
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -371,14 +412,19 @@ class DataProcessor:
                 )
             
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             print(f"Error saving actual data: {e}")
+            if conn:
+                conn.rollback()
             return False
+        finally:
+            if conn:
+                conn.close()
 
     def save_forecast_item(self, fiscal_period_id, scenario, item_name, values_dict):
         """予測データを保存"""
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -390,11 +436,15 @@ class DataProcessor:
                 )
             
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             print(f"Error saving forecast data: {e}")
+            if conn:
+                conn.rollback()
             return False
+        finally:
+            if conn:
+                conn.close()
 
     def load_sub_accounts(self, fiscal_period_id, scenario):
         """補助科目データを読み込み"""
@@ -668,6 +718,16 @@ class DataProcessor:
             # DataFrameに変換
             imported_df = pd.DataFrame.from_dict(imported_data, orient='index').reset_index().rename(columns={'index': '項目名'})
             
+            # 月列を取得してソート
+            month_cols = [c for c in imported_df.columns if c != '項目名']
+            if month_cols:
+                # YYYY-MM形式の月をソート
+                try:
+                    month_cols_sorted = sorted(month_cols, key=lambda x: pd.to_datetime(x + '-01'))
+                    imported_df = imported_df[['項目名'] + month_cols_sorted]
+                except:
+                    pass  # ソート失敗時はそのまま
+            
             # 項目名でソート
             imported_df['項目名'] = pd.Categorical(imported_df['項目名'], categories=self.all_items, ordered=True)
             imported_df = imported_df.sort_values('項目名').reset_index(drop=True)
@@ -679,6 +739,7 @@ class DataProcessor:
 
     def save_extracted_data(self, fiscal_period_id, imported_df):
         """抽出されたDataFrameをデータベースに保存"""
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -688,17 +749,27 @@ class DataProcessor:
             
             months = [c for c in imported_df.columns if c != '項目名']
             
+            # バルクインサート用のデータを準備
+            insert_data = []
             for _, row in imported_df.iterrows():
                 for m in months:
                     val = row[m]
                     if val != 0 and not pd.isna(val):
-                        cursor.execute(
-                            "INSERT INTO actual_data (fiscal_period_id, item_name, month, amount) VALUES (?, ?, ?, ?)",
-                            (fiscal_period_id, row['項目名'], m, float(val))
-                        )
+                        insert_data.append((fiscal_period_id, row['項目名'], m, float(val)))
+            
+            # 一括挿入
+            if insert_data:
+                cursor.executemany(
+                    "INSERT INTO actual_data (fiscal_period_id, item_name, month, amount) VALUES (?, ?, ?, ?)",
+                    insert_data
+                )
             
             conn.commit()
-            conn.close()
             return True, "インポートが完了しました"
         except Exception as e:
+            if conn:
+                conn.rollback()
             return False, str(e)
+        finally:
+            if conn:
+                conn.close()
